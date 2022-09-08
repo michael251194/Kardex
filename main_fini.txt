@@ -1,0 +1,121 @@
+import variables
+from variables import*
+
+while True :
+	file_today = file.format(year,month,day)	
+        f = open(file_today, "r")			#accede au fichier journalier
+
+        r = csv.reader(f)				
+        l = list(r)
+        r.dialect.delimiter
+
+        if count == 0:					#determine le nombre de lignes lors de la premiere ouverture
+                prev_size = len(l)-1
+                prev_size = int(prev_size)
+                current_size = len(l)-1
+                current_size = int(current_size)
+                nbr_line_in_add = 1
+                count += 1
+        else:						#determine le nombre de lignes a chaque ouverture (sauf la premiere)
+                current_size = len(l)-1
+                current_size = int(current_size)
+                nbr_line_in_add = current_size - prev_size
+
+        if nbr_line_in_add <= 0: continue		#rien ne se passe s il n y pas de nouvelles lignes
+
+        else:
+
+         	while count2 < nbr_line_in_add :	#parcours la ou les lignes ajoutees au fichier
+	                count2 += 1
+                        treated_line = l[current_size -(nbr_line_in_add - count2)]
+                        ip = access_ip(count, treated_line)
+			tray = access_num_tray (treated_line)
+   	               	if ip == 1: continue				#ne tient pas compte de la ligne si l heure ne correspond pas lors de la premiere lecture
+                        else:						#compare la/les ip(s) et le/les plateau(x) avec ceux presents dans les listes s il y a une similitude rien ne se passe 
+        	                compar = check(list_size,ip,ips,tray,trays)	
+                                list_size += 1			#incremente la variable indiquant le nombre d elements dans chaque liste
+                                if compar != 1:
+					relay_traite = read_ip (compar)
+					donnees_traitees = choice_relay (relay_traite)
+	
+					device = donnees_traitees[0]
+					device = int(device) 
+					GPIO = donnees_traitees[1]
+					GPIO = int(GPIO)
+					number = donnees_traitees[2]
+					number = int(number)
+
+					current_hour = get_time()		#recuperation de l heure 
+        				R=0
+	
+        				if (device == 1): device =device1	#selectionne le device 1 ou 2
+        				if (device == 2): device =device2
+
+        				if (GPIO == 1 ): GPIO = GPIOA		#selectionne le registre A ou B
+        				if (GPIO ==2): GPIO = GPIOB
+
+        				if (number == 1): choice =0xFE		#definit la valeur du relais a ouvrir en fonction du numero de relais selectionne
+        				elif (number == 2): choice =0xFD
+        				elif (number == 3): choice =0xFB
+        				elif (number == 4): choice =0xF7
+        				elif (number == 5): choice =0xEF
+        				elif (number == 6): choice =0xDF
+        				elif (number == 7): choice =0xBF
+        				elif (number == 8): choice =0x7F
+
+        				time.sleep(1)
+
+        				if (device== device1 and GPIO == GPIOA ):
+               					R=compareTo(RELAY[0],choice)							#compare le relais a ouvrir avec les relais deja ouvert 
+                				if (R == 1):									#si le relais n est pas encore ouvert
+                        				RELAY[0] = open_relay (RELAY[0],choice)					#modification de la valeur du registre 
+                        				bus.write_byte_data(device,GPIO,RELAY[0])				#applicatiion de cette valeur au registre correspondant
+                        				a_ajouter = "{}|{}|{}|{}".format(device, GPIO, number, current_hour)	#assigne a cette variable les donnees utiles pour couper le relais apres un temps determine
+                        				list1.append(a_ajouter)							#ajoute le contenu de la variable a la liste correspondante
+                				else: print("relais deja ouvert")						#si le relais est deja ouvert rien ne se passe
+
+        				if (device == device1 and GPIO == GPIOB):
+                				R=compareTo(RELAY[1],choice)
+                				if (R == 1):
+                        				RELAY[1] = open_relay (RELAY[1],choice)
+                        				bus.write_byte_data(device,GPIO,RELAY[1])
+                        				a_ajouter = "{}|{}|{}|{}".format(device, GPIO, number, current_hour)
+                        				list2.append(a_ajouter)
+                				else: print("relais deja ouvert")
+
+        				if (device == device2 and GPIO == GPIOA):
+               					R=compareTo(RELAY[2],choice)
+                				if (R == 1):
+                        				RELAY[2] = open_relay (RELAY[2],choice)
+                        				bus.write_byte_data(device,GPIO,RELAY[2])
+                        				a_ajouter = "{}|{}|{}|{}".format(device, GPIO, number, current_hour)
+                        				list3.append(a_ajouter)
+                				else: print("relais deja ouvert")
+
+        				if (device == device2 and GPIO == GPIOB):
+                				R=compareTo(RELAY[3],choice)
+                				if (R == 1):
+                        				RELAY[3] = open_relay (RELAY[3],choice)
+                        				bus.write_byte_data(device,GPIO,RELAY[3])
+                        				a_ajouter = "{}|{}|{}|{}".format(device, GPIO, number, current_hour)
+                        				list4.append(a_ajouter)
+                				else: print("relais deja ouvert")
+					time.sleep(3)
+					current_hour = get_time()					#recalcule l heure avant de l'utiliser en parametre de la fonction
+        				closing_relay(LIST,RELAY, current_hour)				#ferme les relais ouverts depuis 3 secondes ou plus			
+						
+					device = 0
+					GPIO = 0
+					number = 0
+		count2 = 0
+
+        f.close()
+        time.sleep(1)			#determine l ecart entre chaque ouverture du fichier
+
+        while list_size > 15:		#rafraichis les listes une fois que celles-ci atteignent une taille superieure a 15, les listes ne pourront pas avoir une taille
+		del ips[0]		#superieur a 15
+		del trays[0]
+		list_size -= 1		#decremente la variable indiquant le nombre d element dans chaque liste
+        prev_size = current_size	#la taille actuelle sera utilisee comme taille precedente dans le prochain cycle
+	
+

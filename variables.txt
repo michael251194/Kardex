@@ -1,0 +1,198 @@
+import smbus
+import time
+import csv
+
+times = time.localtime()		#permet d acceder a l annee, au mois, au jour et a l heure actuelle. Ces valeurs sont stockees dans une liste 
+
+bus = smbus.SMBus(1) # Rev 2 Pi uses 1
+
+device1 = 0x20                          #adresse du premier device
+device2 = 0x24                          #adresse du deuxieme device
+GPIOA  = 0x14                           #adresse contenant les entrees A  ou le bit de poids fort = GPA7
+GPIOB = 0x13                            #adresse contenant les entrees B  ou le bit de poids fort = GPB7
+IODIRA = 0x00                           #adresse qui configure les ports A en I/O
+IODIRB = 0x01                           #adresse qui configure les ports B en I/O
+
+RELAY = [0xFF, 0xFF, 0xFF, 0xFF]                #contient la valeur actuelle des registres A et B dans chaque device
+choice  = 0x00                          #choix du relais que l on desire allumer
+
+list1 = []				#contient les mouvements du registre d entree A pour le device 1
+list2 = []				#contient les mouvements du registre d entree B pour le device 1
+list3 = []				#contient les mouvements du registre d entree A pour le device 2
+list4 = []				#contient les mouvements du registre d entree B pour le device 2
+LIST = [list1,list2,list3,list4]	#permet de recuperer les listes dans la fonction closing_relay
+
+
+count2 = 0                  #sert a la lecture de plusieurs lignes en meme temps
+count = 0                   #determine la taille du fichier lors de la premiere lecture
+year = times[0]
+month = times[1]
+day = times[2]
+hour = times[3]
+minute = times[4]
+second = times[5]
+debut = hour*60 + minute        #concatenation de l heure actuelle
+ips = []			#tableau reprenant les IPS
+compar = 0			#contient la valeur que retourne la fonction de comparaison
+trays = []			#liste reprenant les differents plateaux 
+list_size = 0                   #contient la taille actuelle des listes
+				#les listes fonctionnent ensemble a l'emplacement 1 dans ips on trouve l ip d un kardex et dans la liste trays a l emplacement 1 on trouve le plateau qui lui est associe
+
+
+donnees_traitees = []
+relay_traitee = 0
+file = "{}{}{}.csv"
+
+#initialisation de variables
+bus.write_byte_data (device1,IODIRA,0x00)        #les ports A et B sont configures en entree, les 8 bits sont a 0
+bus.write_byte_data (device1,IODIRB,0x00)
+bus.write_byte_data (device2,IODIRA,0x00)
+bus.write_byte_data (device2,IODIRB,0x00)      #bus.write_byte_data(elem1,elem2,elem3), elem1 = adresse du device auquel on desire acceder
+bus.write_byte_data (device1,GPIOA,0xFF)       #elem2 = contient l adresse du registre auquel on desire acceder
+bus.write_byte_data (device1,GPIOB,0xFF)       #elem3 = contient la valeur a affecte en hexa
+bus.write_byte_data (device2,GPIOA,0xFF)
+bus.write_byte_data (device2,GPIOB,0xFF)       #les entrees des ports A et B sont mise a 0
+
+if month < 10:						#nomme le fichier auquel il faut acceder 
+        file = "{}0{}{}.csv"
+        if day < 10:
+                file="{}0{}0{}.csv"
+if day < 10:
+        file = "{}{}0{}.csv"
+        if month < 10:
+                file = "{}0{}0{}.csv"
+
+def access_ip (j, treated_line) :         #acceder a l IP de la ligne actuelle traitee
+        treated_line = str(treated_line)
+        if j < 1:					#compteur utilise lors de la premiere lecture afin de lire la derniere ligne ecrite dans le fichier 
+                ip = treated_line.split("|")[2]
+                elem = treated_line.split("|")[0]
+                elem = elem.split(" ")[1]			
+                hour_file = elem.split(":")[0]		#" ".split permet de selectionner un element dans une chaine en fonction du caractere qui separe les elements
+                hour_file = int(hour_file)
+                minute_file = elem.split(":")[1]
+                minute_file = int(minute_file)
+                start = hour_file*60 + minute_file	#recuperation de l'heure de la derniere ligne ecrite dans le fichier afin de savoir si celle-ci doit etre traitee
+                if start > 1050:
+                        return ip
+                else:
+                        return 1
+        else:
+                ip = treated_line.split("|")[2]
+                return ip
+
+def access_num_tray (treated_line):          	 	#acceder au plateau de la ligne actuelle traitee
+        treated_line = str(treated_line)
+        tray = treated_line.split("|")[3]
+        return tray
+
+def check (count1,item1,list1,item2,list2): 		#verifier si l ip et le plateau appeles ne se repetent pas
+        count3 = 0
+        check = 0
+        while count3 < count1 :
+        	if (item1 == list1[count3]) and (item2 == list2[count3]):
+                	check = 1
+                count3 += 1
+	list1.append(item1)				#ajout de ces valeurs aux listes correspondantes
+        list2.append(item2)
+        if check == 1:
+	       	return 1
+        else:
+                return item1
+
+def get_time():					#concatenation de l'heure actuelle
+        times = time.localtime()
+        hour = times[3]
+        minute = times[4]
+        second = times[5]
+        h = hour*3600 + minute*60 + second
+	return h        
+	
+def open_relay (open_relay ,choice_relay):      #fonction qui ouvre un relais, ET logique avec les relais deja ouverts et le relais a ouvrir
+        result = open_relay & choice_relay
+        return result
+
+def close_relay (open_relay, choice_relay):     #fonction qui ferme un relais,addition avec les relais deja ouverts et le relais a fermer
+        result = open_relay + choice_relay
+        return result
+
+def compareTo (open_relay,choice):        	#compare le relais a ouvrir/fermer avec l etat du registre sur lequel on agit
+        resut=0
+        result = open_relay &  choice
+        if( result != open_relay):
+                return 1
+        elif (result == open_relay):
+                return 0
+
+def closing_relay (l,r, current_hour):			#ferme les relais actifs depuis 3s 
+        i = 0
+        while i < 4:					#parcours les la liste contenant les informations sur les activations des relais et en parrallele ouvre la liste
+                list = l[i]				#contenant la valeur du du registre d entree auquelle correspond la liste
+                relay = r[i]
+                relay = int(relay)
+                while len(list) >= 1:			#execute la fonction seulement si la liste ouverte contient quelques chose
+                        device = list[0].split("|")[0]
+                        device = int(device)
+                        GPIO = list[0].split("|")[1]
+                        GPIO = int(GPIO)
+                        num = list[0].split("|")[2]
+                        num = int(num)
+                        h = list[0].split("|")[3]
+                        h = int(h)
+                        if (h + 3) < current_hour:			#les devices fonctionnent en inverse c'est-a-dire qu'il faut un GND pour qu'ils s'activent
+                                if (num ==1): choices=1			
+                                elif (num ==2): choices=2
+                                elif (num ==3): choices=4
+                                elif (num ==4): choices=8
+                                elif (num ==5): choices=0x10
+                                elif (num ==6): choices=0x20
+                                elif (num ==7): choices=0x40
+                                elif (num ==8): choices=0x80
+                                del list[0]
+                                relay = relay+ choices
+                                r[i] = relay
+                                bus.write_byte_data(device, GPIO, r[i])
+
+                i += 1
+
+def read_ip (ip):			#lecture de l ip afin d activer le bon relais
+	relay = 0
+	if ip == "1.1.1.1": 
+		relay = 1
+	elif ip == "1.1.1.2":
+		relay = 9
+	elif ip == "1.1.1.3":
+		relay = 17
+	elif ip == "1.1.1.4":
+		relay = 25
+	
+	return relay
+
+def choice_relay(relay):
+	donnee = []
+	if relay <= 8:
+		donnee.append(1)	#device 1
+		donnee.append(1)	#GPIOA 
+		donnee.append(relay)	#numero du relais a allumer
+
+	elif relay <= 16 and relay > 8:
+		donnee.append(1)	#device 1
+		donnee.append(2)	#GPIOB 
+		relay -= 8		
+		donnee.append(relay)	#numero du relais a allumer
+
+	elif relay <=24 and relay >16:
+		donnee.append(2)	#device 2
+		donnee.append(1)	#GPIOA 
+		relay -= 16
+		donnee.append(relay)	#numero du relais a allumer
+
+	elif relay <= 32:
+		donnee.append(2)	#device 2
+		donnee.append(2)	#GPIOB
+		relay -= 24
+		donnee.append(relay)	#numero du relais a allumer
+	return donnee
+
+
+
